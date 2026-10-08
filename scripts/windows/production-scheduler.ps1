@@ -47,7 +47,15 @@ try {
   $production = Get-Task $productionName; $legacy = Get-Task $legacyName
   switch ($Action) {
     'Status' { Emit $null; break }
-    'Ensure' { if ((Is-Legacy $legacy) -and (State-Of $legacy) -eq 'ACTIVE' -and $null -eq $production) { Emit 'LEGACY'; break }; Register-Production $true; Emit $null; break }
+    'Ensure' {
+      if ((Is-Legacy $legacy) -and (State-Of $legacy) -eq 'ACTIVE' -and $null -eq $production) { Emit 'LEGACY'; break }
+      if ((Is-Owned $production) -and (State-Of $production) -eq 'ACTIVE') {
+        Require-Executable
+        $full = [IO.Path]::GetFullPath($ExecutablePath)
+        if (@($production.Actions).Count -eq 1 -and $production.Actions[0].Execute -eq $full -and $production.Actions[0].Arguments -eq '--scheduled-check') { Emit $null; break }
+      }
+      Register-Production $true; Emit $null; break
+    }
     'Disable' { if (Is-Owned $production) { Disable-ScheduledTask -TaskName $productionName -TaskPath '\' | Out-Null }; Emit $null; break }
     'MigrateLegacy' {
       if (-not (Is-Legacy $legacy)) { Emit $null; break }

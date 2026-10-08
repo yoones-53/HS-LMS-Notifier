@@ -85,6 +85,19 @@ test('isolated Electron Wizard, dashboard, bridge boundaries, navigation and sin
     const saved=await page.evaluate(async()=>await window.lms.getStatus());
     await application.evaluate(({ipcMain},reply)=>{
       ipcMain.removeHandler('hs-lms:request');
+      ipcMain.handle('hs-lms:request',()=>({...reply,data:{...reply.data,settings:{...reply.data.settings,autoEnabled:false},nextAt:null}}));
+    },saved);
+    await page.reload();
+    await page.waitForFunction(()=>document.getElementById('next-run')?.textContent==='자동 확인 꺼짐');
+    await application.evaluate(({ipcMain},reply)=>{
+      ipcMain.removeHandler('hs-lms:request');
+      ipcMain.handle('hs-lms:request',()=>({...reply,data:{...reply.data,nextAt:null,
+        scheduler:{...reply.data.scheduler,mode:'ABSENT',state:'ABSENT'}}}));
+    },saved);
+    await page.reload();
+    await page.waitForFunction(()=>document.getElementById('next-run')?.textContent==='예약 없음');
+    await application.evaluate(({ipcMain},reply)=>{
+      ipcMain.removeHandler('hs-lms:request');
       ipcMain.handle('hs-lms:request',()=>({...reply,data:{...reply.data,todo:{items:'malformed'}}}));
     },saved);
     await page.reload();

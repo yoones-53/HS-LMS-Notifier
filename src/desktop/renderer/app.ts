@@ -34,7 +34,8 @@ function render() {
   text('header-status', working || state.busy ? '확인 중…' : latest?.result.title ?? '설정 대기');
   text('outcome', working || state.busy ? 'LMS를 확인하고 있어요' : latest?.result.title ?? '첫 확인을 기다리고 있어요');
   text('outcome-detail', working || state.busy ? '과목을 차례로 확인합니다. 창을 닫아도 트레이에서 계속 진행됩니다.' : latest?.result.reason ?? '지금 확인을 눌러 학습 현황을 가져오세요.');
-  text('last-run', date(latest?.result.occurredAt)); text('next-run', state.nextAt ? date(state.nextAt) : '자동 확인 대기 / 중지');
+  text('last-run', date(latest?.result.occurredAt));
+  text('next-run', !state.settings.autoEnabled ? '자동 확인 꺼짐' : state.nextAt ? date(state.nextAt) : '예약 없음');
   text('lms-connection', `LMS · ${state.credentialsConfigured ? '로그인 정보 등록됨' : '등록 필요'}`);
   text('discord-connection', `Discord · ${state.discordConfigured ? '알림 주소 등록됨' : '등록 필요'}`);
   text('lms-setting-status', state.credentialsConfigured ? '등록됨' : '미등록');

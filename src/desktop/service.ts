@@ -88,8 +88,13 @@ export class DesktopService {
   private async refreshSchedule(): Promise<SchedulerStatus> {
     let scheduler = await this.deps.scheduler();
     if (this.deps.schedulerPolicy === 'TASK') {
-      if (this.settings.setupComplete && this.settings.autoEnabled && (scheduler.mode !== 'LEGACY' || !scheduler.legacyActive)) scheduler = await this.deps.syncScheduler('Ensure');
-      if ((!this.settings.setupComplete || !this.settings.autoEnabled) && scheduler.targetCurrent) scheduler = await this.deps.syncScheduler('Disable');
+      if (this.settings.setupComplete && this.settings.autoEnabled) {
+        // Status polling must not re-register an active task: registration moves NextRunTime.
+        if (['ABSENT', 'STALE'].includes(scheduler.mode)
+            || scheduler.mode === 'LEGACY' && !scheduler.legacyActive) scheduler = await this.deps.syncScheduler('Ensure');
+      } else if (scheduler.targetCurrent && scheduler.state === 'ACTIVE') {
+        scheduler = await this.deps.syncScheduler('Disable');
+      }
       this.nextAt = null;
       return scheduler;
     }
@@ -103,7 +108,10 @@ export class DesktopService {
     const scheduler = await this.refreshSchedule();
     return { settings: { ...this.settings }, credentialsConfigured: await this.deps.configured('LMS'),
       discordConfigured: await this.deps.configured('DISCORD'), busy: !!this.pending, migration: this.migration,
-      scheduler, nextAt: this.deps.schedulerPolicy === 'TASK' && scheduler.mode === 'PRODUCTION' ? scheduler.nextAt : this.nextAt ? new Date(this.nextAt).toISOString() : null,
+      scheduler, nextAt: this.deps.schedulerPolicy === 'TASK'
+        ? this.settings.setupComplete && this.settings.autoEnabled && scheduler.mode === 'PRODUCTION' && scheduler.state === 'ACTIVE'
+          ? scheduler.nextAt : null
+        : this.nextAt ? new Date(this.nextAt).toISOString() : null,
       ...readHistory(this.paths) };
   }
   async handle(input: unknown): Promise<Reply> {

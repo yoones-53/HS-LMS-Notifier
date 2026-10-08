@@ -15,6 +15,7 @@ import { databaseSignature, migrateRuntime } from '../src/runtime/migration.js';
 import { DataFileError, parseJson, writeJson } from '../src/runtime/json.js';
 import { cleanOldLogs } from '../src/runtime/retention.js';
 import { DesktopService, type DesktopDependencies } from '../src/desktop/service.js';
+import { parseSchedulerStatus } from '../src/desktop/scheduler.js';
 import { requestSchema, settingsSchema, type SchedulerStatus } from '../src/desktop/contracts.js';
 import { readHistory } from '../src/desktop/history.js';
 import { isTrustedSender } from '../src/desktop/ipc-policy.js';
@@ -191,6 +192,53 @@ test('production scheduler migrates only after explicit GUI request and recreate
   status={state:'ABSENT',nextAt:null,mode:'LEGACY',legacyDetected:true,legacyActive:false,targetCurrent:false};
   await service.handle({method:'updateSettings',payload:{autoEnabled:true,retentionDays:30}});
   assert.deepEqual(actions,['MigrateLegacy','Ensure']); await service.close();
+});
+test('packaged dashboard reads the task next run without moving it on polling or manual checks', async t => {
+  const f = fixture(t);
+  let nextAt = '2026-10-08T08:30:00.000Z';
+  let scheduler: SchedulerStatus = { state: 'ACTIVE', nextAt, mode: 'PRODUCTION', legacyDetected: false, legacyActive: false, targetCurrent: true };
+  const actions: string[] = [];
+  const service = new DesktopService(f.target, f.target, dependencies({
+    schedulerPolicy: 'TASK',
+    scheduler: async () => scheduler,
+    syncScheduler: async action => {
+      actions.push(action);
+      if (action === 'Disable') scheduler = { ...scheduler, state: 'INACTIVE', mode: 'STALE', nextAt: null };
+      if (action === 'Ensure') scheduler = scheduler.mode === 'ABSENT'
+        ? { ...scheduler, state: 'UNKNOWN', mode: 'UNKNOWN', nextAt: null }
+        : { ...scheduler, state: 'ACTIVE', mode: 'PRODUCTION', nextAt, targetCurrent: true };
+      return scheduler;
+    },
+  }));
+  await service.initialize();
+  await service.handle({ method: 'testCredentials' });
+  await service.handle({ method: 'testDiscord' });
+  await service.handle({ method: 'completeSetup' });
+  await service.handle({ method: 'updateSettings', payload: { autoEnabled: true, retentionDays: 30 } });
+  actions.length = 0;
+  const first = await service.status();
+  assert.equal(first.nextAt, nextAt);
+  assert.equal((await service.status()).nextAt, nextAt);
+  assert.deepEqual(actions, []);
+  assert.equal((await service.handle({ method: 'runCheck' })).ok, true);
+  assert.equal((await service.status()).nextAt, nextAt);
+  assert.deepEqual(actions, []);
+  nextAt = '2026-10-08T09:00:00.000Z';
+  scheduler = { ...scheduler, nextAt };
+  assert.equal((await service.status()).nextAt, nextAt);
+  scheduler = { ...scheduler, mode: 'ABSENT', state: 'ABSENT', nextAt: null, targetCurrent: false };
+  assert.equal((await service.status()).nextAt, null);
+  assert.deepEqual(actions, ['Ensure']);
+  scheduler = { ...scheduler, mode: 'PRODUCTION', state: 'ACTIVE', nextAt, targetCurrent: true };
+  await service.handle({ method: 'updateSettings', payload: { autoEnabled: false, retentionDays: 30 } });
+  assert.equal((await service.status()).nextAt, null);
+  assert.deepEqual(actions, ['Ensure', 'Disable']);
+  await service.close();
+});
+test('malformed scheduler output becomes an unknown status without a crash', () => {
+  for (const output of ['{', '{}', '{"state":"ACTIVE","nextAt":"tomorrow"}', 'null'])
+    assert.deepEqual(parseSchedulerStatus(output), { state: 'UNKNOWN', nextAt: null, mode: 'UNKNOWN',
+      legacyDetected: false, legacyActive: false, targetCurrent: false });
 });
 test('invalid settings file is preserved; service returns fixed safe error instead of crash/reset', async t => {
   const f=fixture(t); const service=new DesktopService(f.target,f.legacy,dependencies()); await service.initialize();
