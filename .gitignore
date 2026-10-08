@@ -1,0 +1,70 @@
+# Dependencies and generated build/test artifacts
+node_modules/
+dist/
+build/
+release/
+coverage/
+*.tsbuildinfo
+test-results/
+playwright-report/
+blob-report/
+
+# Environment files; only reviewed, secret-free templates may be committed
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Browser profiles, authentication state, cookies and session files
+browser-data/
+.browser-data/
+user-data-dir/
+.auth/
+/auth/
+/session/
+/sessions/
+/.sessions/
+playwright/.auth/
+storage-state*.json
+storageState*.json
+storage_state*.json
+auth.json
+auth-state*.json
+session*.json
+cookies*.json
+cookies*.txt
+credentials*.json
+*.pem
+*.key
+
+# Real databases and SQLite sidecar/backup files
+/data/*
+!/data/.gitkeep
+*.db
+*.db-*
+*.db.*
+*.sqlite
+*.sqlite-*
+*.sqlite.*
+*.sqlite3
+*.sqlite3-*
+*.sqlite3.*
+
+# Logs, captured browser data and local-only artifacts
+/logs/*
+!/logs/.gitkeep
+*.log
+*.log.*
+.playwright-mcp/
+screenshots/
+traces/
+trace.zip
+*.har
+/work/
+/outputs/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+Desktop.ini

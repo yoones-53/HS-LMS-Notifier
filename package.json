@@ -1,0 +1,125 @@
+{
+  "name": "hs-lms-notifier",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows desktop notifier for Hanshin University LMS",
+  "type": "module",
+  "main": "dist/gui/main.mjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "gui:install": "node node_modules/electron/install.js",
+    "gui:build": "node --import tsx scripts/gui-build.ts",
+    "gui:dev": "npm run gui:build && node --import tsx scripts/gui-start.ts --dev",
+    "gui:start": "npm run gui:build && node --import tsx scripts/gui-start.ts",
+    "dist:win": "npm run gui:build && node --import tsx scripts/prepare-packaging.ts && electron-builder --win nsis --x64 --publish never && node --import tsx scripts/finalize-packaging.ts",
+    "gui:typecheck": "npm run typecheck",
+    "gui:test": "npm run gui:build && node --import tsx --test tests/desktop.test.ts tests/gui/electron.test.ts",
+    "dev": "node --import tsx src/main.ts",
+    "check": "node --import tsx src/main.ts --check",
+    "courses": "node --import tsx scripts/courses.ts",
+    "boards": "node --import tsx scripts/boards.ts",
+    "assignments": "node --import tsx scripts/assignments.ts",
+    "videos": "node --import tsx scripts/videos.ts",
+    "sync": "node --import tsx scripts/sync.ts",
+    "notify:test": "node --import tsx scripts/notify-test.ts",
+    "notify": "node --import tsx scripts/notify.ts",
+    "login": "node --import tsx scripts/login.ts",
+    "login:check": "node --import tsx scripts/session-check.ts",
+    "credentials:setup": "node --import tsx scripts/credentials.ts setup",
+    "credentials:test": "node --import tsx scripts/credentials.ts test",
+    "credentials:status": "node --import tsx scripts/credentials.ts status",
+    "credentials:remove": "node --import tsx scripts/credentials.ts remove",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "verify:e2e": "node --import tsx --test tests/auto-login.test.ts tests/fresh-monitor.test.ts tests/initial-summary.test.ts tests/run-lock.test.ts tests/status.test.ts tests/security.test.ts tests/scheduler.test.ts",
+    "browser:install": "node node_modules/playwright/cli.js install chromium",
+    "schedule:install": "powershell.exe -NoProfile -File scripts/register-task.ps1",
+    "schedule:status": "powershell.exe -NoProfile -File scripts/manage-task.ps1 -Action Status",
+    "schedule:disable": "powershell.exe -NoProfile -File scripts/manage-task.ps1 -Action Disable",
+    "schedule:enable": "powershell.exe -NoProfile -File scripts/manage-task.ps1 -Action Enable",
+    "schedule:run": "powershell.exe -NoProfile -File scripts/manage-task.ps1 -Action Start"
+  },
+  "dependencies": {
+    "dotenv": "18.0.5",
+    "playwright-core": "1.63.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "electron": "44.6.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2",
+    "playwright": "1.63.0",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  },
+  "build": {
+    "appId": "com.yoones.hs-lms-notifier",
+    "productName": "HS-LMS-Notifier",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/playwright-core/**"
+    ],
+    "compression": "normal",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/gui/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/packaging/playwright-runtime",
+        "to": "playwright"
+      },
+      {
+        "from": "scripts/gui-scheduler-status.ps1",
+        "to": "runtime-scripts/gui-scheduler-status.ps1"
+      },
+      {
+        "from": "scripts/windows/credential-store.ps1",
+        "to": "runtime-scripts/windows/credential-store.ps1"
+      },
+      {
+        "from": "scripts/windows/runtime-root.ps1",
+        "to": "runtime-scripts/windows/runtime-root.ps1"
+      },
+      {
+        "from": "scripts/windows/WinCredential.cs",
+        "to": "runtime-scripts/windows/WinCredential.cs"
+      },
+      {
+        "from": "scripts/windows/production-scheduler.ps1",
+        "to": "runtime-scripts/windows/production-scheduler.ps1"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "HS-LMS-Notifier-Setup-${version}.${ext}",
+      "executableName": "HS-LMS-Notifier",
+      "requestedExecutionLevel": "asInvoker",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "한신 LMS 알리미",
+      "runAfterFinish": false,
+      "deleteAppDataOnUninstall": false,
+      "include": "scripts/installer-scheduler.nsh"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>한신 LMS 알리미</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="todo.css"><script src="renderer.js" defer></script></head>
+<body><div class="layout"><aside><div class="brand"><span class="logo">H</span><div>한신 LMS 알리미<small>나의 학습, 놓치지 않게</small></div></div>
+<nav aria-label="주 메뉴"><button id="nav-home" class="nav active">대시보드</button><button id="nav-settings" class="nav">설정</button></nav>
+<div class="aside-note">한신대학교 LMS 개인 알리미<br>영상 재생이나 출석을 대신하지 않습니다.</div></aside>
+<main><header><div><p class="eyebrow">HS LMS NOTIFIER</p><h1 id="page-title">학습 현황</h1></div><span class="pill" id="header-status">준비 중</span></header>
+<div id="message" class="message" role="status" aria-live="polite" hidden></div>
+<section id="welcome" hidden><article class="card welcome"><span class="hero-mark">H</span><p class="eyebrow">처음 오셨나요?</p><h2>한 번 연결하고,<br>중요한 소식을 받아보세요.</h2><p>공지·자료·과제·온라인 강의를 확인하고<br>새 소식과 가까운 마감을 Discord로 알려드립니다.</p><button id="start" class="primary">시작하기</button><p class="subtle">로그인 정보는 현재 Windows 사용자의 보안 저장소에 보관합니다.</p></article></section>
+<section id="dashboard" hidden>
+<article class="card overview"><div><p class="eyebrow">모니터링 상태</p><h2 id="outcome">첫 확인을 기다리고 있어요</h2><p id="outcome-detail">설정을 완료한 뒤 지금 확인을 눌러 주세요.</p></div><button id="check" class="primary">지금 확인</button>
+<div class="times"><div><small>마지막 확인</small><strong id="last-run">—</strong></div><div><small>다음 확인</small><strong id="next-run">—</strong></div></div></article>
+<div class="connections"><span id="lms-connection">LMS 확인 중</span><span id="discord-connection">Discord 확인 중</span></div>
+<article class="card" id="todo-card"><h2>해야 할 일</h2><p class="subtle" id="todo-coverage"></p>
+<div class="stats todo-stats"><article><small>미제출 과제</small><strong id="todo-assignments">—</strong></article><article><small>미수강 강의 · 확인됨</small><strong id="todo-lectures">—</strong></article><article><small>상태 확인 필요</small><strong id="todo-unknown">—</strong></article><article><small>가장 가까운 마감</small><strong id="todo-nearest">—</strong></article></div>
+<p id="todo-empty" class="schedule" hidden>✅ 현재 확인된 미제출 과제나 미수강 강의가 없습니다.</p>
+<p class="subtle">출석 인정 완료 항목은 제외합니다. 출석 인정은 전체 시청 완료와 다르며, 상태 확인 필요 항목은 미제출·미수강 숫자에 포함하지 않습니다.</p>
+<ul id="todo-list" class="todo-list" aria-label="해야 할 일 목록"></ul></article>
+<div class="stats" aria-label="최근 수집 결과"><article><small>수강 과목</small><strong id="count-courses">—</strong></article><article><small>공지사항</small><strong id="count-notices">—</strong></article><article><small>강의자료</small><strong id="count-materials">—</strong></article><article><small>과제</small><strong id="count-assignments">—</strong></article><article><small>온라인 강의</small><strong id="count-videos">—</strong></article></div>
+<p class="subtle" id="changes">최근 확인 결과가 여기에 표시됩니다.</p><p class="schedule" id="schedule-note"></p>
+<div class="columns"><article class="card"><h3>최근 실행</h3><ul id="recent" class="history"></ul></article><article class="card"><h3>확인이 필요한 항목</h3><div id="incidents"></div><p id="recovery" class="subtle"></p></article></div>
+</section>
+<section id="settings" hidden><p class="step" id="wizard-step" hidden></p><p id="wizard-note" class="subtle" hidden>입력한 비밀값은 저장 후 다시 표시하지 않습니다.</p>
+<article class="card" id="lms-card"><div class="card-heading"><h2>LMS 로그인</h2><span id="lms-setting-status" class="pill">확인 중</span></div><p class="subtle">한 Windows 사용자당 한 LMS 계정을 지원합니다. 기존 기록이 있는 계정을 다른 계정으로 바꾸지 마세요.</p>
+<form id="login-form" autocomplete="off"><div class="form-grid"><label>학번 / LMS ID<input id="lms-id" type="text" maxlength="513" autocomplete="off" spellcheck="false"></label><label>비밀번호<input id="lms-password" type="password" maxlength="1280" autocomplete="new-password"></label></div><div class="actions"><button type="submit">새 로그인 정보 저장</button><button type="button" id="test-login" class="primary">자동 로그인 테스트</button><button type="button" id="remove-login" class="danger">등록 삭제</button></div></form><p class="subtle" id="login-tested"></p></article>
+<article class="card" id="discord-card"><div class="card-heading"><h2>Discord 알림</h2><span id="discord-setting-status" class="pill">확인 중</span></div><form id="discord-form" autocomplete="off"><label>새 Webhook URL<input id="discord-webhook" type="password" maxlength="1280" autocomplete="new-password" placeholder="저장된 주소는 표시하지 않습니다"></label><div class="actions"><button type="submit">새 Webhook 저장</button><button type="button" id="test-discord" class="primary">테스트 알림 보내기</button><button type="button" id="discord-help" class="text-button">Webhook 설정 방법 ↗</button></div></form><p class="subtle" id="discord-tested"></p></article>
+<article class="card" id="monitor-card"><h2>자동 확인과 로그</h2><form id="options-form"><label class="toggle"><input id="auto-enabled" type="checkbox"> Windows 예약 작업으로 30분마다 자동 확인</label><p class="subtle">앱을 완전히 종료해도 자동 확인은 계속됩니다. 이 설정은 알림·데이터 저장과 별개입니다.</p><p class="subtle" id="scheduler-detail"></p><button type="button" id="migrate-scheduler" hidden>기존 개발용 예약 작업 전환</button><label>로그 보관 기간 (일)<input id="retention" type="number" min="7" max="365" value="30"></label><p class="subtle">오래된 실행 로그만 정리합니다. 알림 이력과 학습 데이터는 삭제하지 않습니다.</p><button type="submit">설정 저장</button></form></article>
+<article class="card" id="deadline-card"><h2>Discord 마감 알림</h2><p class="subtle">변경 시 자동 저장하며 다음 확인부터 적용합니다. 해야 할 일 표시와 수집에는 영향을 주지 않습니다.</p>
+<div class="deadline-options"><label class="toggle"><input id="deadline-d7" type="checkbox">7일 전 알림</label><label class="toggle"><input id="deadline-d3" type="checkbox">3일 전 알림</label><label class="toggle"><input id="deadline-d1" type="checkbox">1일 전 알림</label><label class="toggle"><input id="deadline-d0" type="checkbox">당일 알림</label></div></article>
+<div class="actions" id="wizard-actions" hidden><button id="wizard-back">이전</button><button id="wizard-next" class="primary">다음</button></div>
+<article class="card" id="folders-card"><h2>저장 위치</h2><div class="actions"><button id="open-logs">로그 폴더 열기</button><button id="open-data">데이터 위치 열기</button></div><p class="subtle">X는 트레이로 숨깁니다. 완전 종료는 트레이 메뉴 또는 Ctrl+Q를 사용하세요.</p></article></section>
+<footer>로그인·비밀번호·쿠키는 알림이나 실행 로그에 포함하지 않습니다.</footer></main></div></body></html>
