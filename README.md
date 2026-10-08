@@ -2,7 +2,7 @@
 
 한신대학교 LMS의 공지, 강의자료, 과제, 온라인 강의와 마감 변경을 확인해 Discord로 알려주는 Windows 데스크톱 애플리케이션입니다.
 
-한신대학교의 공식 프로그램이 아닌 개인 개발 프로젝트입니다. 현재 버전은 **v0.1.0 Beta**이며, 실제 사용 전 아래의 제한사항을 확인해 주세요.
+한신대학교의 공식 프로그램이 아닌 개인 개발 프로젝트입니다. 현재 버전은 **v0.1.1 Beta**이며, 실제 사용 전 아래의 제한사항을 확인해 주세요.
 
 ## ✨ 주요 기능
 
@@ -41,7 +41,7 @@ ERD 설계 과제
 
 ## 📥 다운로드
 
-현재 버전은 **v0.1.0 Beta**입니다. Windows 설치 프로그램 `HS-LMS-Notifier-Setup-0.1.0.exe`는 GitHub Releases를 통해 제공할 예정입니다.
+현재 버전은 **v0.1.1 Beta**입니다. Windows 설치 프로그램 `HS-LMS-Notifier-Setup-0.1.1.exe`는 GitHub Releases를 통해 제공할 예정입니다.
 
 설치본에는 필요한 Chromium이 포함되므로 일반 사용자는 Node.js, npm, Git 또는 별도 Playwright 설치가 필요하지 않습니다.
 
@@ -165,7 +165,7 @@ npm ci
 npm run dist:win
 ```
 
-산출물은 `release/HS-LMS-Notifier-Setup-0.1.0.exe`에 생성됩니다. `release/`는 Git에 포함하지 않습니다.
+산출물은 `release/HS-LMS-Notifier-Setup-0.1.1.exe`에 생성됩니다. `release/`는 Git에 포함하지 않습니다.
 
 ### CLI
 
