@@ -14,7 +14,7 @@ export function parseSchedulerStatus(output: string): SchedulerStatus {
 const powershell = () => `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
 async function call(action: 'Status' | 'Ensure' | 'Disable' | 'MigrateLegacy', executablePath?: string): Promise<SchedulerStatus> {
   try {
-    const args = ['-NoProfile','-NonInteractive','-File', runtimeScriptPath('windows','production-scheduler.ps1'), '-Action', action];
+    const args = ['-NoProfile','-NonInteractive','-ExecutionPolicy','RemoteSigned','-File', runtimeScriptPath('windows','production-scheduler.ps1'), '-Action', action];
     if (executablePath) args.push('-ExecutablePath', executablePath);
     const { stdout } = await execute(powershell(), args,
       { windowsHide: true, timeout: 8000, maxBuffer: 16_384 });

@@ -12,7 +12,7 @@ $owner = 'HS-LMS-Notifier production scheduler v1'
 
 function Get-Task([string]$Name) { Get-ScheduledTask -TaskName $Name -TaskPath '\' -ErrorAction SilentlyContinue }
 function State-Of($task) { if ($null -eq $task) { 'ABSENT' } elseif ($task.State -eq 'Disabled') { 'INACTIVE' } else { 'ACTIVE' } }
-function Next-Of($task) { if ($null -eq $task) { return $null }; $info = Get-ScheduledTaskInfo -InputObject $task; if ($info.NextRunTime.Year -gt 2000) { return $info.NextRunTime.ToUniversalTime().ToString('o') }; return $null }
+function Next-Of($task) { if ($null -eq $task -or $task.State -eq 'Disabled') { return $null }; $info = Get-ScheduledTaskInfo -InputObject $task; if ($info.NextRunTime.Year -gt 2000) { return $info.NextRunTime.ToUniversalTime().ToString('o') }; return $null }
 function Is-Owned($task) { return $null -ne $task -and $task.Description -eq $owner }
 function Is-Legacy($task) {
   if ($null -eq $task -or $task.Description -notlike 'HS-LMS-Notifier managed task | *') { return $false }
@@ -36,6 +36,11 @@ function Register-Production([bool]$Enabled) {
   Require-Executable; $prod = Get-Task $productionName
   if ($null -ne $prod -and -not (Is-Owned $prod)) { Emit 'CONFLICT'; return }
   $full = [IO.Path]::GetFullPath($ExecutablePath)
+  if ((Is-Owned $prod) -and @($prod.Actions).Count -eq 1 -and $prod.Actions[0].Execute -eq $full -and $prod.Actions[0].Arguments -eq '--scheduled-check') {
+    if ($Enabled -and $prod.State -eq 'Disabled') { Enable-ScheduledTask -TaskName $productionName -TaskPath '\' | Out-Null }
+    elseif (-not $Enabled -and $prod.State -ne 'Disabled') { Disable-ScheduledTask -TaskName $productionName -TaskPath '\' | Out-Null }
+    return
+  }
   $action = New-ScheduledTaskAction -Execute $full -Argument '--scheduled-check' -WorkingDirectory (Split-Path -Parent $full)
   $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(30) -RepetitionInterval (New-TimeSpan -Minutes 30)
   $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
@@ -47,16 +52,8 @@ try {
   $production = Get-Task $productionName; $legacy = Get-Task $legacyName
   switch ($Action) {
     'Status' { Emit $null; break }
-    'Ensure' {
-      if ((Is-Legacy $legacy) -and (State-Of $legacy) -eq 'ACTIVE' -and $null -eq $production) { Emit 'LEGACY'; break }
-      if ((Is-Owned $production) -and (State-Of $production) -eq 'ACTIVE') {
-        Require-Executable
-        $full = [IO.Path]::GetFullPath($ExecutablePath)
-        if (@($production.Actions).Count -eq 1 -and $production.Actions[0].Execute -eq $full -and $production.Actions[0].Arguments -eq '--scheduled-check') { Emit $null; break }
-      }
-      Register-Production $true; Emit $null; break
-    }
-    'Disable' { if (Is-Owned $production) { Disable-ScheduledTask -TaskName $productionName -TaskPath '\' | Out-Null }; Emit $null; break }
+    'Ensure' { if ($null -ne $production -and -not (Is-Owned $production)) { Emit 'CONFLICT'; break }; if ((Is-Legacy $legacy) -and (State-Of $legacy) -eq 'ACTIVE' -and $null -eq $production) { Emit 'LEGACY'; break }; Register-Production $true; Emit $null; break }
+    'Disable' { if (Is-Owned $production) { Disable-ScheduledTask -TaskName $productionName -TaskPath '\' | Out-Null }; if (Is-Legacy $legacy) { Disable-ScheduledTask -TaskName $legacyName -TaskPath '\' | Out-Null }; Emit $null; break }
     'MigrateLegacy' {
       if (-not (Is-Legacy $legacy)) { Emit $null; break }
       if ($null -ne $production -and -not (Is-Owned $production)) { Emit 'CONFLICT'; break }

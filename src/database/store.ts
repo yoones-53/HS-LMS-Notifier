@@ -92,6 +92,8 @@ export class LmsStore {
           const id = itemKey(item);
           if (item.type !== scope.type || courseKey(item) !== key || !item.itemId || seenItems.has(id)) throw new Error('INVALID_SYNC_ITEM');
           seenItems.add(id);
+          // A positive observation always reverses a previous removal, even in a partial list.
+          this.db.prepare('DELETE FROM monitor_state WHERE key=?').run(`lms-removed:${id}`);
           const previous = this.db.prepare('SELECT fingerprint,payload_json,version FROM items WHERE item_key=?').get(id);
           const hash = fingerprint(item), payload = JSON.stringify(item);
           if (!previous) {
@@ -107,6 +109,16 @@ export class LmsStore {
           } else {
             result.unchanged++;
             this.db.prepare('UPDATE items SET last_seen_at=? WHERE item_key=?').run(now, id);
+          }
+        }
+        // Only an explicitly collected, complete scope proves absence. Missing menus,
+        // failed courses/scopes and unidentified lecture rows must never imply deletion.
+        if (scope.complete !== false && (scope.type === 'ASSIGNMENT' || scope.type === 'VIDEO')) {
+          const stored = this.db.prepare('SELECT item_key FROM items WHERE course_key=? AND type=?').all(key, scope.type);
+          for (const row of stored) {
+            const id = String(row.item_key);
+            if (!seenItems.has(id)) this.db.prepare('INSERT OR IGNORE INTO monitor_state(key,value) VALUES(?,?)')
+              .run(`lms-removed:${id}`, now);
           }
         }
         this.db.prepare('INSERT OR IGNORE INTO scope_baselines VALUES (?,?,?)').run(key, scope.type, now);

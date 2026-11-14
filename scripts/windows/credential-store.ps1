@@ -9,7 +9,7 @@ $VerbosePreference = 'SilentlyContinue'
 $DebugPreference = 'SilentlyContinue'
 $stage = 'INITIALIZE'
 try {
-    if ($Target -notin @('HS-LMS-Notifier:LMS:v1','HS-LMS-Notifier:Discord:v1') -and $Target -notmatch '^HS-LMS-Notifier:test:[a-f0-9-]{36}$') { throw 'INVALID_TARGET' }
+    if ($Target -notin @('HS-LMS-Notifier:LMS:v1','HS-LMS-Notifier:Discord:v1','HS-LMS-Notifier:GoogleCalendar:v1') -and $Target -notmatch '^HS-LMS-Notifier:(?:test:[a-f0-9-]{36}|DiscordCourse:[a-f0-9]{64})$') { throw 'INVALID_TARGET' }
     Add-Type -Path (Join-Path $PSScriptRoot 'WinCredential.cs') -ErrorAction Stop
     switch ($Action) {
         'Save' {

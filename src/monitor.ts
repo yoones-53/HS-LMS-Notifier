@@ -35,7 +35,8 @@ export interface MonitorResult extends RunResult {
 const isAuthError = (error: unknown): boolean => classifyError(error) === 'AUTH_EXPIRED_DURING_CRAWL';
 
 export async function runMonitor(store: LmsStore, source: LmsSource, transport: Transport, log: Log,
-  options: { now?: () => Date; deliveryDelayMs?: number; authenticate?: () => Promise<void>; dispose?: () => Promise<void>; notificationAvailable?: boolean; signal?: AbortSignal; deadlineNotifications?: DeadlineNotifications } = {}): Promise<MonitorResult> {
+  options: { now?: () => Date; deliveryDelayMs?: number; authenticate?: () => Promise<void>; dispose?: () => Promise<void>; notificationAvailable?: boolean; signal?: AbortSignal; deadlineNotifications?: DeadlineNotifications;
+    courseTransport?: (key: string) => Transport; routedCourses?: ReadonlySet<string> } = {}): Promise<MonitorResult> {
   const checkCancelled = () => { if (options.signal?.aborted) throw new AppError('UNKNOWN_ERROR'); };
   const now = options.now ?? (() => new Date());
   const runId = randomUUID();
@@ -101,7 +102,7 @@ export async function runMonitor(store: LmsStore, source: LmsSource, transport: 
             course: courseKey(course), type, count: data.items.length, excluded: data.unidentifiedOnlineRows ?? 0,
           });
           if (data.status === 'OK') {
-            scopes.push({ course, type, items: data.items });
+            scopes.push({ course, type, items: data.items, complete: !(data.unidentifiedOnlineRows ?? 0) });
             const counter = { NOTICE: 'notices', MATERIAL: 'materials', ASSIGNMENT: 'assignments', VIDEO: 'videos' } as const;
             result[counter[type]] += data.items.length;
           }
@@ -133,18 +134,22 @@ export async function runMonitor(store: LmsStore, source: LmsSource, transport: 
       throw new AppError('DISCORD_NOTIFICATION_FAILED');
     }
     if (result.loginMode === 'AUTO' && !result.failures) {
+      const usesDefault = (course: Course) => !options.routedCourses?.has(courseKey(course));
       result.initialSummary = await notifyInitialSummary(store,
-        buildInitialSetupSummary(courses, scopes.flatMap(s => s.items), now(), excludedOnlineRows), transport, log, now());
+        buildInitialSetupSummary(courses.filter(usesDefault), scopes.filter(s => usesDefault(s.course)).flatMap(s => s.items), now(),
+          options.routedCourses?.size ? 0 : excludedOnlineRows), transport, log, now());
       if (result.initialSummary.status === 'SENT') await delay(options.deliveryDelayMs ?? 1_100);
     } else {
       result.initialSummary = { status: 'SKIPPED', reason: result.failures ? 'INCOMPLETE_SYNC' : 'NOT_AUTO_LOGIN', delivery: null };
       log('INITIAL_SUMMARY', { status: result.initialSummary.status, reason: result.initialSummary.reason! });
     }
     const summaryDeferred = result.initialSummary.delivery === 'RETRY' || result.initialSummary.delivery === 'DEFERRED';
-    const changed = summaryDeferred ? { sent: 0, deferred: 0, uncertain: 0 }
-      : await notifyChanges(store, transport, options.deliveryDelayMs, new Set(courses.map(courseKey)));
-    const deadlines = summaryDeferred || changed.deferred || changed.uncertain ? { sent: 0, deferred: 0, uncertain: 0 }
-      : await notifyDeadlines(store, deadlineReminders(fresh, now()), transport, options.deliveryDelayMs, options.deadlineNotifications);
+    const blocked = options.routedCourses?.size ? new Set<Transport>() : undefined;
+    if (summaryDeferred || result.initialSummary.delivery === 'UNKNOWN') blocked?.add(transport);
+    const changed = !blocked && summaryDeferred ? { sent: 0, deferred: 0, uncertain: 0 }
+      : await notifyChanges(store, transport, options.deliveryDelayMs, new Set(courses.map(courseKey)), options.courseTransport, blocked);
+    const deadlines = !blocked && (summaryDeferred || changed.deferred || changed.uncertain) ? { sent: 0, deferred: 0, uncertain: 0 }
+      : await notifyDeadlines(store, deadlineReminders(fresh, now()), transport, options.deliveryDelayMs, options.deadlineNotifications, options.courseTransport, blocked);
     result.sent = Number(result.initialSummary.status === 'SENT') + changed.sent + deadlines.sent;
     result.deferred = Number(summaryDeferred) + changed.deferred + deadlines.deferred;
     result.uncertain = Number(store.db.prepare("SELECT count(*) n FROM notification_history WHERE status IN ('UNKNOWN','SENDING')").get()?.n);

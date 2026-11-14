@@ -6,8 +6,10 @@ import type { RuntimePaths } from '../runtime/paths.js';
 import { cleanIssue, incidentsSchema, parsedRun, recoverySchema, resultSchema } from '../status/schema.js';
 import { buildTodo, todoSourceSchema } from '../summary/todo.js';
 import { z } from 'zod';
+import { loadSettings } from '../runtime/settings.js';
+import { courseKey } from '../model.js';
 
-export function readHistory(paths: RuntimePaths) {
+export function readHistory(paths: RuntimePaths, includeExcluded = false) {
   const recentFile = join(paths.logs, 'latest-run.json');
   if (existsSync(recentFile)) readJson(recentFile, resultSchema);
   const db = new DatabaseSync(paths.database, { readOnly: true, timeout: 1000 });
@@ -29,8 +31,10 @@ export function readHistory(paths: RuntimePaths) {
     const items = db.prepare("SELECT payload_json FROM items WHERE type IN ('ASSIGNMENT','VIDEO') AND last_seen_at=?").all(collectedAt)
       .map(row => parseJson(String(row.payload_json), todoSourceSchema));
     const todo = buildTodo(courses, items, new Date(), collectedAt, !collectedAt ? 'NOT_COLLECTED'
-      : syncResult?.result.collectionStatus === 'SUCCESS' && recent[0]?.result.collectionStatus === 'SUCCESS' ? 'COMPLETE' : 'PARTIAL');
-    return { recent, incidents: incident ? parseJson(String(incident.value), incidentsSchema).map(i => cleanIssue(i.issue)) : [],
+      : syncResult?.result.collectionStatus === 'SUCCESS' && recent[0]?.result.collectionStatus === 'SUCCESS' ? 'COMPLETE' : 'PARTIAL', includeExcluded ? [] : loadSettings(paths).excludedTodoKeys);
+    const discordCourses = db.prepare('SELECT course_id AS courseId,class_no AS classNo,name FROM courses ORDER BY name,course_key').all()
+      .map(row => ({key: courseKey({courseId: String(row.courseId), classNo: String(row.classNo)}), name: String(row.name)}));
+    return { recent, discordCourses, incidents: incident ? parseJson(String(incident.value), incidentsSchema).map(i => cleanIssue(i.issue)) : [],
       recovery: recovered ? { occurredAt: recovered.occurredAt, issue: cleanIssue(recovered.issue) } : null, todo };
   } finally { db.close(); }
 }

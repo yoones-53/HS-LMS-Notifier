@@ -35,6 +35,10 @@ session*.json
 cookies*.json
 cookies*.txt
 credentials*.json
+client_secret*.json
+*oauth-client*.json
+token.json
+tokens.json
 *.pem
 *.key
 

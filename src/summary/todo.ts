@@ -36,11 +36,13 @@ export function todoDeadline(due: string | null, now: Date) {
 }
 
 export function buildTodo(courses: Array<{ courseId: string; classNo: string; name: string }>, sources: TodoSource[], now: Date,
-  collectedAt: string | null, coverage: TodoDashboard['coverage'] = 'COMPLETE'): TodoDashboard {
+  collectedAt: string | null, coverage: TodoDashboard['coverage'] = 'COMPLETE', excludedKeys: string[] = []): TodoDashboard {
+  const excluded = new Set(excludedKeys);
   const active = new Map(courses.map(c => [`${c.courseId}:${c.classNo}`, c.name]));
   const unique = new Map(sources.map(i => [`${i.courseId}:${i.classNo}:${i.type}:${i.itemId}`, i]));
   const items: TodoDashboard['items'] = [];
   for (const [key, item] of unique) {
+    if (excluded.has(key)) continue;
     const courseName = active.get(`${item.courseId}:${item.classNo}`);
     if (!courseName) continue;
     const state = item.type === 'ASSIGNMENT' ? assignmentState(item) : lectureState(item);

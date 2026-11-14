@@ -7,13 +7,20 @@ import type { RuntimePaths } from './paths.js';
 export const deadlineNotificationsSchema = z.object({ d7: z.boolean(), d3: z.boolean(), d1: z.boolean(), d0: z.boolean() }).strict();
 export type DeadlineNotifications = z.infer<typeof deadlineNotificationsSchema>;
 export const defaultDeadlineNotifications = (): DeadlineNotifications => ({ d7: true, d3: true, d1: true, d0: true });
+export const googleCalendarSchema = z.object({ enabled: z.boolean(), connectedAt: z.iso.datetime().nullable() }).strict();
 export const settingsSchema = z.object({ version: z.literal(1), setupComplete: z.boolean(), autoEnabled: z.boolean(),
   intervalMinutes: z.literal(30), retentionDays: z.number().int().min(7).max(365), trayHintShown: z.boolean(),
   lmsVerifiedAt: z.iso.datetime().nullable(), discordVerifiedAt: z.iso.datetime().nullable(),
+  excludedTodoKeys: z.array(z.string().min(1).max(2000)).max(10000).default([]),
+  discordCourseKeys: z.array(z.string().min(1).max(2000)).max(200).default([]),
+  googleCalendar: googleCalendarSchema.default(() => ({enabled:false,connectedAt:null})),
   deadlineNotifications: deadlineNotificationsSchema.default(defaultDeadlineNotifications) }).strict();
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaultSettings = (): Settings => ({ version: 1, setupComplete: false, autoEnabled: true, intervalMinutes: 30,
   retentionDays: 30, trayHintShown: false, lmsVerifiedAt: null, discordVerifiedAt: null,
+  excludedTodoKeys: [],
+  discordCourseKeys: [],
+  googleCalendar: {enabled:false,connectedAt:null},
   deadlineNotifications: defaultDeadlineNotifications() });
 export const settingsPatchSchema = z.object({ autoEnabled: z.boolean(), retentionDays: z.number().int().min(7).max(365),
   deadlineNotifications: deadlineNotificationsSchema.optional() }).strict();

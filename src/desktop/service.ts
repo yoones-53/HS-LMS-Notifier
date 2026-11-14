@@ -11,13 +11,23 @@ import { STATUS_INFO } from '../status/model.js';
 import { AppError, classifyError } from '../utils/result.js';
 import { defaultSettings, requestSchema, settingsSchema, type DesktopStatus, type Reply, type SchedulerStatus, type Settings } from './contracts.js';
 import { readHistory } from './history.js';
+import { CalendarError } from '../calendar/auth.js';
+import { readCalendarStatus } from '../calendar/sync.js';
 
 export interface DesktopDependencies {
+  calendarLoginAvailable?:boolean;
+  connectCalendar?(signal:AbortSignal):Promise<void>;
+  disconnectCalendar?():Promise<void>;
+  verifyCalendar?(signal:AbortSignal):Promise<void>;
+  syncCalendar?(paths:RuntimePaths,signal:AbortSignal):Promise<void>;
   configured(kind: 'LMS' | 'DISCORD'): Promise<boolean>;
   readId(): Promise<string>;
   saveLogin(value: Credentials): Promise<void>;
   removeLogin(): Promise<void>;
   saveDiscord(value: string): Promise<void>;
+  saveDiscordCourse?(key: string, value: string): Promise<void>;
+  removeDiscordCourse?(key: string): Promise<void>;
+  testDiscordCourse?(key: string): Promise<void>;
   legacyWebhook(): string | undefined;
   testLogin(signal: AbortSignal): Promise<void>;
   testDiscord(): Promise<void>;
@@ -28,6 +38,9 @@ export interface DesktopDependencies {
   open(target: 'logs' | 'data' | 'help'): Promise<void>;
 }
 export function desktopError(error: unknown): string {
+  if(error instanceof CalendarError&&error.kind==='API_DISABLED')return '서비스의 Google Calendar API가 활성화되지 않았습니다. 운영자 설정을 확인해 주세요.';
+  if(error instanceof CalendarError&&error.kind==='PERMISSION')return '기본 캘린더 접근 권한을 확인하지 못했습니다. Google 계정과 캘린더 동의를 확인해 주세요.';
+  if(error instanceof CalendarError) return error.kind==='SETUP'?'이 배포본은 Google 로그인 준비가 필요합니다. 개발자에게 업데이트를 요청해 주세요.':error.kind==='CANCELLED'?'Google 로그인을 취소했거나 대기 시간이 지났습니다.':error.kind==='AUTH'?'Google 연결을 승인하지 못했습니다. 다시 로그인해 주세요.':'Google에 연결하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요.';
   if (error instanceof DataFileError) return '데이터 파일을 읽을 수 없습니다. 파일을 삭제하지 말고 로그와 데이터 위치를 확인해 주세요.';
   if (error instanceof AppError) {
     const code = classifyError(error);
@@ -73,6 +86,27 @@ export class DesktopService {
     cleanOldLogs(this.paths.logs, this.settings.retentionDays);
     this.ready = true;
     await this.refreshSchedule();
+    if(this.settings.googleCalendar.enabled && this.deps.verifyCalendar) {
+      // A broken optional integration must never prevent LMS/Discord startup.
+      try {await this.exclusive(signal=>this.validateCalendar(signal));}catch{/* Status is recorded by validation. */}
+    }
+  }
+  private async validateCalendar(signal:AbortSignal):Promise<void> {
+    if(!this.settings.googleCalendar.connectedAt || !this.deps.verifyCalendar)throw new CalendarError('AUTH');
+    const file=join(this.paths.state,'google-calendar-status.json');
+    const status=readCalendarStatus(this.paths);
+    try {
+      await this.deps.verifyCalendar(signal);
+      writeJson(file,{...status,state:status.pending?'RETRY':'READY',verifiedAt:new Date().toISOString(),retryAt:null,lastError:'NONE'});
+    } catch(error) {
+      const kind=error instanceof CalendarError&&['AUTH','PERMISSION','API_DISABLED'].includes(error.kind)?error.kind:'NETWORK';
+      writeJson(file,{...status,state:kind==='NETWORK'?'RETRY':'AUTH_REQUIRED',retryAt:null,lastError:kind});throw error;
+    }
+  }
+  private async syncCalendar(signal:AbortSignal):Promise<void> {
+    if(this.deps.syncCalendar)await this.deps.syncCalendar(this.paths,signal);
+    const status=readCalendarStatus(this.paths);
+    if(status.state==='AUTH_REQUIRED')throw new CalendarError(status.lastError==='PERMISSION'?'PERMISSION':status.lastError==='API_DISABLED'?'API_DISABLED':'AUTH');
   }
   private persist(): void { writeJson(this.settingsFile, settingsSchema.parse(this.settings)); }
   private async exclusive<T>(action: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -88,13 +122,8 @@ export class DesktopService {
   private async refreshSchedule(): Promise<SchedulerStatus> {
     let scheduler = await this.deps.scheduler();
     if (this.deps.schedulerPolicy === 'TASK') {
-      if (this.settings.setupComplete && this.settings.autoEnabled) {
-        // Status polling must not re-register an active task: registration moves NextRunTime.
-        if (['ABSENT', 'STALE'].includes(scheduler.mode)
-            || scheduler.mode === 'LEGACY' && !scheduler.legacyActive) scheduler = await this.deps.syncScheduler('Ensure');
-      } else if (scheduler.targetCurrent && scheduler.state === 'ACTIVE') {
-        scheduler = await this.deps.syncScheduler('Disable');
-      }
+      if (this.settings.setupComplete && this.settings.autoEnabled && scheduler.mode !== 'PRODUCTION' && (scheduler.mode !== 'LEGACY' || !scheduler.legacyActive)) scheduler = await this.deps.syncScheduler('Ensure');
+      if ((!this.settings.setupComplete || !this.settings.autoEnabled) && (scheduler.targetCurrent && scheduler.state === 'ACTIVE' || !this.settings.autoEnabled && scheduler.legacyDetected && scheduler.legacyActive)) scheduler = await this.deps.syncScheduler('Disable');
       this.nextAt = null;
       return scheduler;
     }
@@ -108,11 +137,9 @@ export class DesktopService {
     const scheduler = await this.refreshSchedule();
     return { settings: { ...this.settings }, credentialsConfigured: await this.deps.configured('LMS'),
       discordConfigured: await this.deps.configured('DISCORD'), busy: !!this.pending, migration: this.migration,
-      scheduler, nextAt: this.deps.schedulerPolicy === 'TASK'
-        ? this.settings.setupComplete && this.settings.autoEnabled && scheduler.mode === 'PRODUCTION' && scheduler.state === 'ACTIVE'
-          ? scheduler.nextAt : null
-        : this.nextAt ? new Date(this.nextAt).toISOString() : null,
-      ...readHistory(this.paths) };
+      scheduler, nextAt: !this.settings.autoEnabled ? null : this.deps.schedulerPolicy === 'TASK' && scheduler.mode === 'PRODUCTION' ? scheduler.nextAt : this.nextAt ? new Date(this.nextAt).toISOString() : null,
+      ...readHistory(this.paths), excludedTodo: readHistory(this.paths, true).todo.items.filter(item => this.settings.excludedTodoKeys.includes(item.key)),
+      calendar:{...readCalendarStatus(this.paths),loginAvailable:this.deps.calendarLoginAvailable??false} };
   }
   async handle(input: unknown): Promise<Reply> {
     const parsed = requestSchema.safeParse(input);
@@ -128,9 +155,42 @@ export class DesktopService {
       if (method === 'getStatus') return { ok: true, data: await this.status() };
       if (method === 'getSettings') return { ok: true, data: { ...this.settings } };
       if (method === 'getRecentIncidents') return { ok: true, data: readHistory(this.paths).incidents };
+      // Scheduling can be paused while a manual collection owns the runtime lock.
+      if (parsed.data.method === 'setAutoEnabled') {
+        this.settings.autoEnabled = parsed.data.payload; this.nextAt = null; this.persist();
+        const scheduler = await this.refreshSchedule();
+        if (this.deps.schedulerPolicy === 'TASK' && (scheduler.state === 'UNKNOWN' || scheduler.mode === 'CONFLICT'
+            || !this.settings.autoEnabled && (scheduler.state === 'ACTIVE' || scheduler.legacyDetected && scheduler.legacyActive)))
+          return { ok: false, message: '설정은 저장했지만 Windows 예약 작업 변경을 확인하지 못했습니다. 예약 작업 상태를 확인해 주세요.' };
+        return { ok: true };
+      }
       const data = await this.exclusive(async signal => {
         const request = parsed.data;
         switch (request.method) {
+          case 'connectCalendar': {
+            if(!this.deps.connectCalendar)throw new CalendarError('SETUP');
+            await this.deps.connectCalendar(signal);
+            this.settings.googleCalendar={enabled:true,connectedAt:new Date().toISOString()};this.persist();
+            writeJson(join(this.paths.state,'google-calendar-status.json'),{state:'READY',pending:0,lastSyncAt:null,retryAt:null,verifiedAt:new Date().toISOString(),lastError:'NONE'});
+            await this.syncCalendar(signal);return;
+          }
+          case 'verifyCalendar':
+            await this.validateCalendar(signal);if(this.settings.googleCalendar.enabled)await this.syncCalendar(signal);return;
+          case 'disconnectCalendar':
+            this.settings.googleCalendar.enabled=false;this.persist();
+            if(!this.deps.disconnectCalendar)throw new CalendarError('SETUP');
+            await this.deps.disconnectCalendar();this.settings.googleCalendar.connectedAt=null;this.persist();return;
+          case 'setCalendarEnabled':
+            if(request.payload && !this.settings.googleCalendar.connectedAt)throw new CalendarError('AUTH');
+            this.settings.googleCalendar.enabled=request.payload;this.persist();if(request.payload)await this.syncCalendar(signal);return;
+          case 'setTodoExcluded': {
+            const keys = new Set(this.settings.excludedTodoKeys);
+            if (request.payload.excluded) {
+              if (!readHistory(this.paths).todo.items.some(item => item.key === request.payload.key)) throw new AppError('INITIALIZATION_ERROR');
+              keys.add(request.payload.key);
+            } else keys.delete(request.payload.key);
+            this.settings = settingsSchema.parse({ ...this.settings, excludedTodoKeys: [...keys] }); this.persist(); return;
+          }
           case 'runCheck': {
             const result = guiRun(await this.deps.run(this.paths, signal));
             this.nextAt = null;
@@ -156,8 +216,41 @@ export class DesktopService {
             try { validateWebhook(request.payload.webhook); await this.deps.saveDiscord(request.payload.webhook); }
             finally { request.payload.webhook = ''; }
             this.settings.discordVerifiedAt = null; this.persist(); return;
+          case 'configureDiscordCourse': {
+            const {key} = request.payload;
+            const previousKeys = this.settings.discordCourseKeys;
+            try {
+              if (!this.deps.saveDiscordCourse || !readHistory(this.paths).discordCourses.some(course => course.key === key))
+                throw new AppError('INITIALIZATION_ERROR');
+              validateWebhook(request.payload.webhook);
+              const updated = settingsSchema.parse({ ...this.settings, discordCourseKeys: [...new Set([...previousKeys, key])] });
+              await this.deps.saveDiscordCourse(key, request.payload.webhook);
+              if (previousKeys.includes(key)) return;
+              try { writeJson(this.settingsFile, updated); }
+              catch (error) {
+                await this.deps.removeDiscordCourse?.(key).catch(() => {});
+                throw error;
+              }
+              this.settings = updated;
+            } finally { request.payload.webhook = ''; }
+            return;
+          }
+          case 'removeDiscordCourse': {
+            const key = request.payload;
+            if (!this.settings.discordCourseKeys.includes(key)) return;
+            await this.deps.removeDiscordCourse?.(key);
+            const updated = { ...this.settings, discordCourseKeys: this.settings.discordCourseKeys.filter(value => value !== key) };
+            writeJson(this.settingsFile, updated);
+            this.settings = updated;
+            return;
+          }
           case 'testDiscord':
             await this.deps.testDiscord(); this.settings.discordVerifiedAt = new Date().toISOString(); this.persist(); return;
+          case 'testDiscordCourse':
+            if (!this.deps.testDiscordCourse || !this.settings.discordCourseKeys.includes(request.payload))
+              throw new AppError('DISCORD_NOTIFICATION_FAILED');
+            await this.deps.testDiscordCourse(request.payload);
+            return;
           case 'completeSetup':
             if (!this.settings.lmsVerifiedAt || !this.settings.discordVerifiedAt) throw new AppError('INITIALIZATION_ERROR');
             this.settings.setupComplete = true; this.persist(); await this.refreshSchedule(); return;

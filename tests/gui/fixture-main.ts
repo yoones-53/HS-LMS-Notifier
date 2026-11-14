@@ -11,17 +11,26 @@ import { parseAssignment } from '../../src/crawler/assignments.js';
 import { parseOnlineRow } from '../../src/crawler/videos.js';
 import { loadSettings } from '../../src/runtime/settings.js';
 import type { SchedulerStatus } from '../../src/desktop/contracts.js';
+import { CalendarError } from '../../src/calendar/auth.js';
 app.setPath('userData', process.argv[2]!);
 if (!app.requestSingleInstanceLock()) app.quit();
 else { void app.whenReady().then(async () => {
   let lms = false, discord = false, runs = 0;
   let scheduler: SchedulerStatus = {state:'ABSENT',nextAt:null,mode:'LEGACY',legacyDetected:true,legacyActive:true,targetCurrent:false};
   const service = new DesktopService(runtimePaths(app.getPath('userData')), runtimePaths(join(app.getPath('userData'), 'legacy')), {
+    calendarLoginAvailable:process.env.HS_LMS_FIXTURE_CALENDAR_UNAVAILABLE!=='1',connectCalendar:async()=>{},disconnectCalendar:async()=>{},verifyCalendar:async()=>{
+      if(process.env.HS_LMS_FIXTURE_CALENDAR_FAIL==='1'){delete process.env.HS_LMS_FIXTURE_CALENDAR_FAIL;throw new CalendarError('AUTH');}
+    },
     configured: async kind => kind === 'LMS' ? lms : discord, readId: async () => 'synthetic-student',
     saveLogin: async () => { lms=true; }, removeLogin: async () => { lms=false; }, saveDiscord: async () => { discord=true; },
+    saveDiscordCourse: async () => {}, removeDiscordCourse: async () => {}, testDiscordCourse: async () => {},
     legacyWebhook: () => undefined, testLogin: async () => {}, testDiscord: async () => {},
     scheduler: async () => scheduler, schedulerPolicy:'TASK',
-    syncScheduler: async action => { if (action === 'MigrateLegacy') scheduler={state:'ACTIVE',nextAt:null,mode:'PRODUCTION',legacyDetected:true,legacyActive:false,targetCurrent:true}; return scheduler; }, open: async () => {},
+    syncScheduler: async action => {
+      if (action === 'Disable') scheduler = {...scheduler,state:'INACTIVE',mode:'STALE',nextAt:null,legacyActive:false};
+      else scheduler={state:'ACTIVE',nextAt:null,mode:'PRODUCTION',legacyDetected:true,legacyActive:false,targetCurrent:true};
+      return scheduler;
+    }, open: async () => {},
     run: async paths => {
       const store=new LmsStore(paths.database);
       const course = parseCourse({id:'selfarea_TEST1_A',href:"javascript:fncGoClassroom('TEST1','A','3');",title:'합성 과목'}, {year:'2026년',term:'2학기'});

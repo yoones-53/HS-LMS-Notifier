@@ -64,6 +64,15 @@ test('overdue tasks stay visible; deadline then type/course/title/key ties are s
   const a=todo(items).items;assert.equal(a[0]?.dayLabel,'D+1');assert.equal(a.at(-1)?.days,null);
   assert.deepEqual(a,todo([...items].reverse()).items);assert.equal(a[1]?.title,'A');
 });
+test('excluded assignments and lectures stay out of totals after collection and settings reload', t => {
+  const paths=fixture(t);const keys=todo([assignment,video]).items.map(item=>item.key);
+  writeJson(join(paths.state,'settings.json'),{...defaultSettings(),excludedTodoKeys:keys});
+  const saved=loadSettings(paths);assert.deepEqual(saved.excludedTodoKeys,keys);
+  const result=buildTodo([course],[{...assignment,title:'새 제목'},video],now,now.toISOString(),'COMPLETE',saved.excludedTodoKeys);
+  assert.equal(result.items.length,0);assert.equal(result.pendingAssignments,0);assert.equal(result.incompleteLectures,0);assert.equal(result.nearest,null);
+  assert.equal(buildTodo([course],[assignment,video],now,now.toISOString(),'COMPLETE',keys.slice(1)).items.length,1);
+});
+
 test('todo deduplicates identities and excludes inactive courses', () => {
   assert.equal(todo([assignment,assignment,{...assignment,courseId:'OLD'}]).items.length,1);
 });

@@ -5,10 +5,32 @@ import { runMonitor, type LmsSource } from '../src/monitor.js';
 import { AppError, classifyError, printOutcome, RESULT_INFO } from '../src/utils/result.js';
 import { parseCourse, LmsError } from '../src/crawler/courses.js';
 import { parseAssignment } from '../src/crawler/assignments.js';
+import { parseOnlineRow } from '../src/crawler/videos.js';
+import { itemKey } from '../src/model.js';
 const course = parseCourse({ id: 'selfarea_TEST1_A', href: "javascript:fncGoClassroom('TEST1','A','3');", title: '합성 과목' }, { year: '2026년', term: '2학기' });
 const assignment = parseAssignment({ onclick: "fncModifyReport('1','N','1','Y','Y')", title: '합성 과제', period: '26/10/01 00:00 ~ 26/10/13 23:59', submission: '미제출', progress: '진행' }, course);
 const source: LmsSource = { courses: async () => [course], enter: async () => {}, collect: async (_c, t) => ({ status: 'OK', items: t === 'ASSIGNMENT' ? [assignment] : [] }) };
 const now = () => new Date('2026-10-06T12:00:00+09:00');
+
+test('monitor propagates incomplete lecture lists and unavailable menus without falsely marking deletion',async()=>{
+  const store=new LmsStore(':memory:');
+  const video=parseOnlineRow({id:'1',contentId:null,title:'합성 강의',period:null,status:null},course)!;
+  const marker=`lms-removed:${itemKey(video)}`;
+  let mode:'partial'|'unavailable'|'empty'='partial';
+  const input:LmsSource={...source,collect:async(_course,type)=>type==='VIDEO'
+    ?{status:mode==='unavailable'?'UNAVAILABLE':'OK',items:[],unidentifiedOnlineRows:mode==='partial'?1:0}
+    :{status:'OK',items:[]}};
+  const options={now,deliveryDelayMs:0,authenticate:async()=>{},dispose:async()=>{}};
+  try {
+    store.sync([course],[{course,type:'VIDEO',items:[video]}]);
+    for (const value of ['partial','unavailable'] as const) {
+      mode=value;await runMonitor(store,input,async()=>({status:'SENT'}),()=>{},options);
+      assert.equal(store.db.prepare('SELECT value FROM monitor_state WHERE key=?').get(marker),undefined);
+    }
+    mode='empty';await runMonitor(store,input,async()=>({status:'SENT'}),()=>{},options);
+    assert.ok(store.db.prepare('SELECT value FROM monitor_state WHERE key=?').get(marker));
+  } finally {store.close();}
+});
 test('each run authenticates and closes; existing baseline/history and D-Day dedup survive fresh login', async () => {
   const store = new LmsStore(':memory:'); let logins = 0; let closes = 0; let sends = 0;
   const options = { now, deliveryDelayMs: 0, authenticate: async () => { logins++; }, dispose: async () => { closes++; } };
