@@ -18,7 +18,12 @@ test('install, start and reopen existing data under Restricted on a fresh Window
     t.skip('Requires a disposable GitHub-hosted Windows runner.');
     return;
   }
-  const env = { ...process.env, PSExecutionPolicyPreference: 'Restricted' };
+  const env: Record<string, string> = {};
+  // Windows PowerShell needs its own module search path when started from PowerShell 7.
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !['PSMODULEPATH', 'PSEXECUTIONPOLICYPREFERENCE'].includes(key.toUpperCase())) env[key] = value;
+  }
+  env.PSExecutionPolicyPreference = 'Restricted';
   const powershell = join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const getPolicy = async () => {
     const { stdout } = await exec(powershell, ['-NoProfile', '-NonInteractive', '-Command',
