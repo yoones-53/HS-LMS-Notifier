@@ -28,7 +28,7 @@ export async function credentialBridge(action: Action, target = CREDENTIAL_TARGE
     for (const key of Object.keys(env)) {
       if (['PSMODULEPATH', 'DISCORD_WEBHOOK_URL'].includes(key.toUpperCase())) delete env[key];
     }
-    const args = ['-NoLogo', '-NoProfile', ...(interactive ? [] : ['-NonInteractive']), '-File', runtimeScriptPath('windows', 'credential-store.ps1'), '-Action', action, '-Target', target];
+    const args = ['-NoLogo', '-NoProfile', ...(interactive ? [] : ['-NonInteractive']), '-ExecutionPolicy', 'RemoteSigned', '-File', runtimeScriptPath('windows', 'credential-store.ps1'), '-Action', action, '-Target', target];
     const child = spawn(executable, args, { windowsHide: !interactive, env,
       stdio: interactive ? 'inherit' : [input ? 'pipe' : 'ignore', 'pipe', 'ignore'] });
     child.stdin?.on('error', () => {});
