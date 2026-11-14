@@ -5,7 +5,7 @@ import { issue, safeResult, type RunIssue, type RunResult } from '../status/mode
 
 export type LogCode = 'RUN_START' | 'AUTH_OK' | 'AUTH_EXPIRED' | 'AUTH_NOTICE' | 'COURSES'
   | 'SCOPE_OK' | 'SCOPE_UNAVAILABLE' | 'SCOPE_FAILED' | 'COURSE_FAILED' | 'SYNC'
-  | 'NOTIFICATIONS' | 'RUN_FINISH' | 'RUN_FAILED' | 'ALREADY_RUNNING' | 'RESULT' | 'AUTO_LOGIN' | 'BROWSER_CLOSED' | 'INITIAL_SUMMARY' | 'RECOVERY' | 'ERROR_NOTICE';
+  | 'NOTIFICATIONS' | 'RUN_FINISH' | 'RUN_FAILED' | 'ALREADY_RUNNING' | 'RESULT' | 'AUTO_LOGIN' | 'BROWSER_CLOSED' | 'INITIAL_SUMMARY' | 'RECOVERY' | 'ERROR_NOTICE' | 'CALENDAR_SYNC_FAILED';
 export interface LogFields { [key: string]: unknown; result?: RunResult; issue?: RunIssue }
 export type Log = (code: LogCode, fields?: LogFields) => void;
 

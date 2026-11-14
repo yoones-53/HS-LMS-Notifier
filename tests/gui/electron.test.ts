@@ -19,6 +19,7 @@ test('isolated Electron Wizard, dashboard, bridge boundaries, navigation and sin
   try {
     const page=await application.firstWindow();
     await page.getByRole('button',{name:'시작하기',exact:true}).click();
+    assert.equal(await page.locator('#calendar-card').isHidden(),true);
     await page.getByLabel('학번 / LMS ID').fill('synthetic-student');
     await page.getByLabel('비밀번호',{exact:true}).fill('synthetic-only');
     await page.getByRole('button',{name:'새 로그인 정보 저장',exact:true}).click();
@@ -27,6 +28,7 @@ test('isolated Electron Wizard, dashboard, bridge boundaries, navigation and sin
     assert.equal(await page.getByLabel('학번 / LMS ID').inputValue(),'');
     await page.getByRole('button',{name:'자동 로그인 테스트',exact:true}).click();
     await page.getByRole('button',{name:'다음',exact:true}).click();
+    assert.equal(await page.locator('#calendar-card').isHidden(),true);
     await page.getByLabel('새 Webhook URL',{exact:true}).fill('https://discord.com/api/webhooks/123/synthetic_only');
     await page.getByRole('button',{name:'새 Webhook 저장',exact:true}).click();
     await page.waitForFunction(()=>document.getElementById('message')?.textContent?.includes('알림 주소를 저장했습니다.'));
@@ -36,11 +38,42 @@ test('isolated Electron Wizard, dashboard, bridge boundaries, navigation and sin
     await page.getByRole('button',{name:'설정 완료하고 첫 확인',exact:true}).click();
     await page.waitForFunction(()=>document.getElementById('count-courses')?.textContent==='1');
     assert.equal(await page.locator('#dashboard').isVisible(),true);
+    assert.equal((await page.evaluate(()=>window.lms.getSettings())).data?.googleCalendar.enabled,false);
     await page.getByRole('button',{name:'설정',exact:true}).click();
+    await page.locator('#discord-course').selectOption('TEST1:A');
+    await page.getByLabel('전용 채널 Webhook URL',{exact:true}).fill('https://discord.com/api/webhooks/1/SYNTHETIC_ONLY');
+    await page.getByRole('button',{name:'전용 채널 저장',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('discord-course-list')?.textContent?.includes('합성 과목'));
+    assert.equal(await page.locator('#discord-course-webhook').inputValue(),'');
+    await page.locator('#discord-course-list').getByRole('button',{name:'테스트 알림 보내기',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('message')?.textContent?.includes('합성 과목 전용 Discord 채널로 테스트 알림을 보냈습니다.'));
+    page.once('dialog',dialog=>dialog.accept());
+    await page.getByRole('button',{name:'기본 채널로 되돌리기',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('discord-course-list')?.childElementCount===0);
     assert.equal(await page.getByRole('button',{name:'기존 개발용 예약 작업 전환',exact:true}).isVisible(),true);
     await page.getByRole('button',{name:'기존 개발용 예약 작업 전환',exact:true}).click();
     await page.waitForFunction(()=>document.getElementById('message')?.textContent?.includes('기존 개발용 예약 작업을 안전하게 전환했습니다.'));
     assert.equal(await page.locator('#migrate-scheduler').isHidden(),true);
+    await page.getByRole('button',{name:'Google로 로그인',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('calendar-status')?.textContent==='연결됨');
+    assert.equal(await page.locator('#calendar-enabled').isChecked(),true);
+    await application.evaluate(()=>{process.env.HS_LMS_FIXTURE_CALENDAR_FAIL='1';});
+    await page.getByRole('button',{name:'연결 검수 · 기존 마감 반영',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('calendar-alert')?.hidden===false);
+    assert.match(await page.locator('#calendar-alert').innerText(),/Google 계정 연결/);
+    await page.getByRole('button',{name:'연결 검수 · 기존 마감 반영',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('calendar-alert')?.hidden===true);
+    await page.locator('#calendar-enabled').uncheck();
+    await page.waitForFunction(()=>document.getElementById('calendar-status')?.textContent==='자동 반영 중지');
+    await page.getByLabel('Google 캘린더로 마감 받기',{exact:true}).check();
+    await page.waitForFunction(()=>document.getElementById('calendar-status')?.textContent==='연결됨');
+    await page.getByLabel('Google 캘린더로 마감 받기',{exact:true}).uncheck();
+    await page.waitForFunction(()=>document.getElementById('calendar-status')?.textContent==='자동 반영 중지');
+    await page.reload();await page.getByRole('button',{name:'설정',exact:true}).click();
+    assert.equal(await page.locator('#calendar-enabled').isChecked(),false);
+    await page.getByRole('button',{name:'연결 해제',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('calendar-status')?.textContent==='연결 안 됨');
+    assert.equal(await page.locator('#calendar-enabled').isDisabled(),true);
     await page.getByRole('button',{name:'대시보드',exact:true}).click();
     assert.equal(await page.locator('#todo-assignments').textContent(),'1');
     assert.equal(await page.locator('#todo-lectures').textContent(),'1');
@@ -48,6 +81,18 @@ test('isolated Electron Wizard, dashboard, bridge boundaries, navigation and sin
     assert.equal(await page.locator('#todo-list li').count(),4);
     assert.match(await page.locator('#todo-list').innerText(),/상태 확인 필요/);
     assert.doesNotMatch(await page.locator('#todo-list').innerText(),/합성 제출 완료|합성 출석 완료/);
+    await page.getByRole('button',{name:'자동 확인 중단',exact:true}).click();
+    await page.waitForFunction(async()=>(await window.lms.getSettings()).data?.autoEnabled===false);
+    await page.reload();
+    await page.getByRole('button',{name:'자동 확인 재개',exact:true}).click();
+    await page.waitForFunction(async()=>(await window.lms.getSettings()).data?.autoEnabled===true);
+    await page.locator('#todo-list li').filter({hasText:'합성 미제출 과제'}).getByRole('button',{name:'관심영역에서 제외',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('todo-assignments')?.textContent==='0');
+    await page.reload();
+    await page.waitForFunction(()=>document.querySelectorAll('#todo-list li').length===3);
+    await page.locator('summary').click();
+    await page.getByRole('button',{name:'관심영역에 복원',exact:true}).click();
+    await page.waitForFunction(()=>document.getElementById('todo-assignments')?.textContent==='1');
     const boundary=await page.evaluate(async()=>({node:typeof (globalThis as unknown as {require?:unknown}).require,
       keys:Object.keys(window.lms),status:await window.lms.getStatus(),bad:await window.lms.updateSettings({autoEnabled:true,retentionDays:-1})}));
     assert.equal(boundary.node,'undefined'); assert.equal(boundary.bad.ok,false);
@@ -83,19 +128,6 @@ test('isolated Electron Wizard, dashboard, bridge boundaries, navigation and sin
     const exit=await new Promise<number|null>((resolve,reject)=>{const timer=setTimeout(()=>{second.kill();reject(new Error('second instance did not exit'));},10_000);second.once('exit',code=>{clearTimeout(timer);resolve(code);});});
     assert.equal(exit,0); assert.equal(application.windows().length,1);
     const saved=await page.evaluate(async()=>await window.lms.getStatus());
-    await application.evaluate(({ipcMain},reply)=>{
-      ipcMain.removeHandler('hs-lms:request');
-      ipcMain.handle('hs-lms:request',()=>({...reply,data:{...reply.data,settings:{...reply.data.settings,autoEnabled:false},nextAt:null}}));
-    },saved);
-    await page.reload();
-    await page.waitForFunction(()=>document.getElementById('next-run')?.textContent==='자동 확인 꺼짐');
-    await application.evaluate(({ipcMain},reply)=>{
-      ipcMain.removeHandler('hs-lms:request');
-      ipcMain.handle('hs-lms:request',()=>({...reply,data:{...reply.data,nextAt:null,
-        scheduler:{...reply.data.scheduler,mode:'ABSENT',state:'ABSENT'}}}));
-    },saved);
-    await page.reload();
-    await page.waitForFunction(()=>document.getElementById('next-run')?.textContent==='예약 없음');
     await application.evaluate(({ipcMain},reply)=>{
       ipcMain.removeHandler('hs-lms:request');
       ipcMain.handle('hs-lms:request',()=>({...reply,data:{...reply.data,todo:{items:'malformed'}}}));

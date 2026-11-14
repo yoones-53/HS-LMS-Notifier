@@ -5,6 +5,7 @@ export type ChangeType = 'NEW_NOTICE' | 'NEW_MATERIAL' | 'NEW_ASSIGNMENT' | 'NEW
 export interface ChangeEvent {
   key: string; type: ChangeType; item: LmsItem; version: number; detectedAt: string;
   previousDueAt: string | null;
+  courseContentChanged?: boolean;
 }
 
 /** Pure comparison: no Playwright, database calls, network or wall-clock access. */
@@ -13,11 +14,13 @@ export function detectChanges(change: ItemChange, detectedAt: string): ChangeEve
   if (before && itemKey(before) !== itemKey(after)) throw new Error('ITEM_IDENTITY_MISMATCH');
   if (!Number.isSafeInteger(version) || version < 1) throw new Error('INVALID_ITEM_VERSION');
   const types: ChangeType[] = [];
+  let courseContentChanged = false;
   if (!before) types.push(`NEW_${after.type}`);
   else {
     if (after.type === 'ASSIGNMENT' && before.type === 'ASSIGNMENT') {
-      if (['title', 'startsAt', 'submitted', 'submissionStatus'].some(k =>
-        before[k as keyof typeof before] !== after[k as keyof typeof after])) types.push('ASSIGNMENT_UPDATED');
+      courseContentChanged = before.title !== after.title || before.startsAt !== after.startsAt;
+      if (courseContentChanged || before.submitted !== after.submitted || before.submissionStatus !== after.submissionStatus)
+        types.push('ASSIGNMENT_UPDATED');
     }
     if ((after.type === 'ASSIGNMENT' || after.type === 'VIDEO')
       && (before.type === 'ASSIGNMENT' || before.type === 'VIDEO')
@@ -27,5 +30,6 @@ export function detectChanges(change: ItemChange, detectedAt: string): ChangeEve
       && before.attendanceConfirmed !== true && after.attendanceConfirmed === true) types.push('VIDEO_COMPLETED');
   }
   return types.map(type => ({ key: `${itemKey(after)}:v${version}:${type}`, type, item: after, version, detectedAt,
+    ...(type === 'ASSIGNMENT_UPDATED' ? { courseContentChanged } : {}),
     previousDueAt: before && 'dueAt' in before ? before.dueAt : null }));
 }

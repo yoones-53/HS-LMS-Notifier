@@ -1,5 +1,6 @@
 # Resolve MSIX AppData redirection without changing Windows virtualization/security settings.
 $ErrorActionPreference='Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 Add-Type @'
 using System;
 using System.Text;

@@ -11,7 +11,7 @@ export function physicalDesktopRoot(): string {
   assertSafeDiagnostics();
   try {
     const output = execFileSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe'),
-      ['-NoProfile','-NonInteractive','-File',runtimeScriptPath('windows', 'runtime-root.ps1')],
+      ['-NoProfile','-NonInteractive','-ExecutionPolicy','RemoteSigned','-File',runtimeScriptPath('windows', 'runtime-root.ps1')],
       { windowsHide:true, encoding:'utf8', timeout:10_000, maxBuffer:16_384, stdio:['ignore','pipe','ignore'] });
     const {root}=parseJson(output.trim(),z.object({root:z.string().min(1)}).strict());
     if (!isAllowedDesktopRoot(root,desktopRoot())) throw new DataFileError();

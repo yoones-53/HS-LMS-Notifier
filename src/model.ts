@@ -7,6 +7,6 @@ import type { OnlineLecture } from './crawler/videos.js';
 export type LmsItem = BoardItem | Assignment | OnlineLecture;
 export type ItemType = LmsItem['type'];
 export interface ItemChange { before: LmsItem | null; after: LmsItem; version: number }
-export interface ScopeSnapshot { course: Course; type: ItemType; items: LmsItem[] }
+export interface ScopeSnapshot { course: Course; type: ItemType; items: LmsItem[]; complete?: boolean }
 export const courseKey = (course: Pick<Course, 'courseId' | 'classNo'>): string => `${course.courseId}:${course.classNo}`;
 export const itemKey = (item: LmsItem): string => `${courseKey(item)}:${item.type}:${item.itemId}`;

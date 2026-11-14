@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { AppError } from '../utils/result.js';
 import { runtimeScriptPath } from '../utils/resources.js';
@@ -8,11 +9,15 @@ export interface Credentials { id: string; password: string }
 export type CredentialLoader = () => Promise<Credentials>;
 export const CREDENTIAL_TARGET = 'HS-LMS-Notifier:LMS:v1';
 export const DISCORD_TARGET = 'HS-LMS-Notifier:Discord:v1';
+export const CALENDAR_TARGET = 'HS-LMS-Notifier:GoogleCalendar:v1';
+export const discordCourseTarget = (courseKey: string): string =>
+  'HS-LMS-Notifier:DiscordCourse:' + createHash('sha256').update(courseKey).digest('hex');
 type Action = 'Read' | 'Status' | 'Remove' | 'Setup' | 'TestWrite' | 'Save';
 export async function credentialBridge(action: Action, target = CREDENTIAL_TARGET, input?: Buffer): Promise<Buffer> {
   assertSafeDiagnostics();
   if (process.platform !== 'win32') throw new AppError('UNKNOWN_ERROR');
-  if (![CREDENTIAL_TARGET, DISCORD_TARGET].includes(target) && !/^HS-LMS-Notifier:test:[a-f0-9-]{36}$/.test(target)) throw new AppError('UNKNOWN_ERROR');
+  if (![CREDENTIAL_TARGET, DISCORD_TARGET, CALENDAR_TARGET].includes(target)
+      && !/^HS-LMS-Notifier:(?:test:[a-f0-9-]{36}|DiscordCourse:[a-f0-9]{64})$/.test(target)) throw new AppError('UNKNOWN_ERROR');
   if ((action === 'Save') !== !!input || (input && input.length > 16_384)) throw new AppError('UNKNOWN_ERROR');
   const executable = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   return new Promise((resolve, reject) => {
@@ -23,7 +28,7 @@ export async function credentialBridge(action: Action, target = CREDENTIAL_TARGE
     for (const key of Object.keys(env)) {
       if (['PSMODULEPATH', 'DISCORD_WEBHOOK_URL'].includes(key.toUpperCase())) delete env[key];
     }
-    const args = ['-NoLogo', '-NoProfile', ...(interactive ? [] : ['-NonInteractive']), '-File', runtimeScriptPath('windows', 'credential-store.ps1'), '-Action', action, '-Target', target];
+    const args = ['-NoLogo', '-NoProfile', ...(interactive ? [] : ['-NonInteractive']), '-ExecutionPolicy', 'RemoteSigned', '-File', runtimeScriptPath('windows', 'credential-store.ps1'), '-Action', action, '-Target', target];
     const child = spawn(executable, args, { windowsHide: !interactive, env,
       stdio: interactive ? 'inherit' : [input ? 'pipe' : 'ignore', 'pipe', 'ignore'] });
     child.stdin?.on('error', () => {});

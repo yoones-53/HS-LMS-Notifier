@@ -58,7 +58,7 @@ else {
       const directory = target === 'logs' ? paths.logs : paths.root;
       mkdirSync(directory, { recursive: true });
       if (await shell.openPath(directory)) throw new Error('OPEN_FAILED');
-    }));
+    },url=>shell.openExternal(url)));
     try { if (startupError) throw new DataFileError(); assertSafeDiagnostics(); await service.initialize(); service.startTimer(); }
     catch (error) { initializationError = desktopError(error); }
     window = await createDesktopWindow(input => service!.handle(input), process.argv.includes('--dev'));

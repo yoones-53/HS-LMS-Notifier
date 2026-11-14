@@ -15,13 +15,13 @@ import { databaseSignature, migrateRuntime } from '../src/runtime/migration.js';
 import { DataFileError, parseJson, writeJson } from '../src/runtime/json.js';
 import { cleanOldLogs } from '../src/runtime/retention.js';
 import { DesktopService, type DesktopDependencies } from '../src/desktop/service.js';
-import { parseSchedulerStatus } from '../src/desktop/scheduler.js';
 import { requestSchema, settingsSchema, type SchedulerStatus } from '../src/desktop/contracts.js';
 import { readHistory } from '../src/desktop/history.js';
 import { isTrustedSender } from '../src/desktop/ipc-policy.js';
 import { guiRun } from '../src/status/schema.js';
 import { runResult } from '../src/status/model.js';
 import { credentialBridge, readCredentials, saveCredentials } from '../src/auth/credentials.js';
+import { CalendarError } from '../src/calendar/auth.js';
 
 function fixture(t: { after(fn: () => void): void }) {
   const root = mkdtempSync(join(tmpdir(), 'hs-lms-gui-test-'));
@@ -45,6 +45,37 @@ function dependencies(overrides: Partial<DesktopDependencies> = {}): DesktopDepe
     scheduler: async () => ({ state: 'ABSENT', nextAt: null, mode: 'ABSENT', legacyDetected: false, legacyActive: false, targetCurrent: false }),
     schedulerPolicy: 'TIMER', syncScheduler: async () => ({ state: 'ABSENT', nextAt: null, mode: 'ABSENT', legacyDetected: false, legacyActive: false, targetCurrent: false }), open: async () => {}, ...overrides };
 }
+
+test('course channel settings survive reopening without exposing their webhook', async t => {
+  const f = fixture(t);
+  await seed(f.target.database);
+  const vault = new Map<string, string>();
+  const tested: string[] = [];
+  const deps = dependencies({
+    saveDiscordCourse: async (key, value) => { vault.set(key, value); },
+    removeDiscordCourse: async key => { vault.delete(key); },
+    testDiscordCourse: async key => { tested.push(key); },
+  });
+  const service = new DesktopService(f.target, f.target, deps);
+  await service.initialize();
+  const key = (await service.status()).discordCourses![0]!.key;
+  const webhook = 'https://discord.com/api/webhooks/1/SYNTHETIC_ONLY';
+  assert.equal((await service.handle({ method: 'configureDiscordCourse', payload: { key, webhook } })).ok, true);
+  assert.equal(vault.get(key), webhook);
+  assert.doesNotMatch(readFileSync(join(f.target.state, 'settings.json'), 'utf8'), /SYNTHETIC_ONLY/);
+  assert.doesNotMatch(JSON.stringify(await service.status()), /SYNTHETIC_ONLY/);
+  await service.close();
+  const reopened = new DesktopService(f.target, f.target, deps);
+  await reopened.initialize();
+  assert.deepEqual((await reopened.status()).settings.discordCourseKeys, [key]);
+  assert.equal((await reopened.handle({ method: 'testDiscordCourse', payload: key })).ok, true);
+  assert.equal((await reopened.handle({ method: 'testDiscordCourse', payload: 'unconfigured' })).ok, false);
+  assert.deepEqual(tested, [key]);
+  assert.equal((await reopened.handle({ method: 'removeDiscordCourse', payload: key })).ok, true);
+  assert.deepEqual((await reopened.status()).settings.discordCourseKeys, []);
+  assert.equal(vault.size, 0);
+  await reopened.close();
+});
 
 test('runtime path injection rejects relative roots and route escapes', async t => {
   const f = fixture(t); assert.throws(() => runtimePaths('relative'), DataFileError);
@@ -150,6 +181,44 @@ test('wizard requires successful credential and Discord tests; settings cannot f
   assert.equal((await service.handle({method:'completeSetup'})).ok,true);
   assert.equal((await service.status()).settings.setupComplete,true); await service.close();
 });
+test('Google is optional during setup; receive toggle persists across restart independently of LMS and Discord',async t=>{
+  const f=fixture(t);let connects=0,disconnects=0;
+  const deps=dependencies({calendarLoginAvailable:true,connectCalendar:async()=>{connects++;},disconnectCalendar:async()=>{disconnects++;}});
+  const service=new DesktopService(f.target,f.legacy,deps);await service.initialize();
+  assert.deepEqual((await service.status()).settings.googleCalendar,{enabled:false,connectedAt:null});
+  await service.handle({method:'testCredentials'});await service.handle({method:'testDiscord'});
+  assert.equal((await service.handle({method:'completeSetup'})).ok,true);assert.equal(connects,0);
+  assert.equal((await service.status()).settings.googleCalendar.enabled,false);
+  assert.equal((await service.handle({method:'connectCalendar'})).ok,true);assert.equal(connects,1);
+  assert.equal((await service.handle({method:'setCalendarEnabled',payload:false})).ok,true);
+  const stopped=(await service.status()).settings;await service.close();
+  const reopened=new DesktopService(f.target,f.legacy,deps);await reopened.initialize();
+  const settings=(await reopened.status()).settings;
+  assert.equal(settings.googleCalendar.enabled,false);assert.ok(settings.googleCalendar.connectedAt);assert.equal(connects,1);
+  assert.equal(settings.autoEnabled,stopped.autoEnabled);assert.deepEqual(settings.deadlineNotifications,stopped.deadlineNotifications);
+  assert.equal((await reopened.handle({method:'setCalendarEnabled',payload:true})).ok,true);
+  assert.equal((await reopened.status()).settings.googleCalendar.enabled,true);
+  assert.equal((await reopened.handle({method:'disconnectCalendar'})).ok,true);assert.equal(disconnects,1);
+  assert.deepEqual((await reopened.status()).settings.googleCalendar,{enabled:false,connectedAt:null});await reopened.close();
+});
+
+test('calendar login imports immediately and saved accounts are validated without another login; failures remain optional',async t=>{
+  const f=fixture(t);let connections=0,checks=0,syncs=0,fail=false;
+  const deps=dependencies({calendarLoginAvailable:true,connectCalendar:async()=>{connections++;},
+    verifyCalendar:async()=>{checks++;if(fail)throw new CalendarError('PERMISSION');},syncCalendar:async()=>{syncs++;}});
+  const service=new DesktopService(f.target,f.legacy,deps);await service.initialize();
+  assert.equal((await service.handle({method:'connectCalendar'})).ok,true);assert.equal(syncs,1);
+  await service.close();
+  const restored=new DesktopService(f.target,f.legacy,deps);await restored.initialize();
+  assert.equal(connections,1);assert.equal(checks,1);assert.ok((await restored.status()).calendar?.verifiedAt);
+  fail=true;const failure=await restored.handle({method:'verifyCalendar'});
+  assert.equal(failure.ok,false);assert.match(failure.message!,/접근 권한/);
+  assert.equal((await restored.status()).calendar?.state,'AUTH_REQUIRED');assert.equal((await restored.status()).calendar?.lastError,'PERMISSION');
+  assert.equal((await restored.handle({method:'runCheck'})).ok,true); // Optional Google failure leaves manual LMS usable.
+  fail=false;assert.equal((await restored.handle({method:'verifyCalendar'})).ok,true);
+  assert.equal((await restored.status()).calendar?.lastError,'NONE');assert.equal(syncs,2);await restored.close();
+});
+
 test('tray explanation is persisted once and settings retain no secret fields',async t=>{
   const f=fixture(t);const service=new DesktopService(f.target,f.legacy,dependencies());await service.initialize();
   assert.equal(service.trayHint(),true);assert.equal(service.trayHint(),false);
@@ -193,53 +262,34 @@ test('production scheduler migrates only after explicit GUI request and recreate
   await service.handle({method:'updateSettings',payload:{autoEnabled:true,retentionDays:30}});
   assert.deepEqual(actions,['MigrateLegacy','Ensure']); await service.close();
 });
-test('packaged dashboard reads the task next run without moving it on polling or manual checks', async t => {
-  const f = fixture(t);
-  let nextAt = '2026-10-08T08:30:00.000Z';
-  let scheduler: SchedulerStatus = { state: 'ACTIVE', nextAt, mode: 'PRODUCTION', legacyDetected: false, legacyActive: false, targetCurrent: true };
-  const actions: string[] = [];
-  const service = new DesktopService(f.target, f.target, dependencies({
-    schedulerPolicy: 'TASK',
-    scheduler: async () => scheduler,
-    syncScheduler: async action => {
-      actions.push(action);
-      if (action === 'Disable') scheduler = { ...scheduler, state: 'INACTIVE', mode: 'STALE', nextAt: null };
-      if (action === 'Ensure') scheduler = scheduler.mode === 'ABSENT'
-        ? { ...scheduler, state: 'UNKNOWN', mode: 'UNKNOWN', nextAt: null }
-        : { ...scheduler, state: 'ACTIVE', mode: 'PRODUCTION', nextAt, targetCurrent: true };
-      return scheduler;
-    },
-  }));
-  await service.initialize();
-  await service.handle({ method: 'testCredentials' });
-  await service.handle({ method: 'testDiscord' });
-  await service.handle({ method: 'completeSetup' });
-  await service.handle({ method: 'updateSettings', payload: { autoEnabled: true, retentionDays: 30 } });
-  actions.length = 0;
-  const first = await service.status();
-  assert.equal(first.nextAt, nextAt);
-  assert.equal((await service.status()).nextAt, nextAt);
-  assert.deepEqual(actions, []);
-  assert.equal((await service.handle({ method: 'runCheck' })).ok, true);
-  assert.equal((await service.status()).nextAt, nextAt);
-  assert.deepEqual(actions, []);
-  nextAt = '2026-10-08T09:00:00.000Z';
-  scheduler = { ...scheduler, nextAt };
-  assert.equal((await service.status()).nextAt, nextAt);
-  scheduler = { ...scheduler, mode: 'ABSENT', state: 'ABSENT', nextAt: null, targetCurrent: false };
-  assert.equal((await service.status()).nextAt, null);
-  assert.deepEqual(actions, ['Ensure']);
-  scheduler = { ...scheduler, mode: 'PRODUCTION', state: 'ACTIVE', nextAt, targetCurrent: true };
-  await service.handle({ method: 'updateSettings', payload: { autoEnabled: false, retentionDays: 30 } });
-  assert.equal((await service.status()).nextAt, null);
-  assert.deepEqual(actions, ['Ensure', 'Disable']);
-  await service.close();
+test('pause works during collection, persists on restart, and active production reads do not register again', async t => {
+  const f=fixture(t); await seed(f.legacy.database);
+  let scheduler: SchedulerStatus={state:'ACTIVE',nextAt:new Date(Date.now()+1800000).toISOString(),mode:'PRODUCTION',legacyDetected:true,legacyActive:false,targetCurrent:true};
+  const actions:string[]=[]; let finish!:()=>void;
+  const deps=dependencies({schedulerPolicy:'TASK',scheduler:async()=>scheduler,
+    syncScheduler:async action=>{actions.push(action); scheduler={...scheduler,state:action==='Disable'?'INACTIVE':'ACTIVE',mode:action==='Disable'?'STALE':'PRODUCTION',nextAt:null,legacyActive:false};return scheduler;},
+    run:async()=>{await new Promise<void>(resolve=>{finish=resolve;});return runResult('SUCCESS');}});
+  const service=new DesktopService(f.target,f.legacy,deps); await service.initialize();
+  await service.status();await service.status(); assert.deepEqual(actions,[]);
+  const running=service.handle({method:'runCheck'});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal((await service.handle({method:'setAutoEnabled',payload:false})).ok,true);
+  assert.deepEqual(actions,['Disable']);assert.equal((await service.status()).nextAt,null);
+  finish();await running;await service.close();
+  const reopened=new DesktopService(f.target,f.legacy,deps);await reopened.initialize();
+  assert.equal((await reopened.status()).settings.autoEnabled,false);
+  assert.equal((await reopened.handle({method:'setAutoEnabled',payload:true})).ok,true);
+  assert.deepEqual(actions,['Disable','Ensure']);await reopened.close();
 });
-test('malformed scheduler output becomes an unknown status without a crash', () => {
-  for (const output of ['{', '{}', '{"state":"ACTIVE","nextAt":"tomorrow"}', 'null'])
-    assert.deepEqual(parseSchedulerStatus(output), { state: 'UNKNOWN', nextAt: null, mode: 'UNKNOWN',
-      legacyDetected: false, legacyActive: false, targetCurrent: false });
+
+test('pause disables a recognized active legacy scheduler and reports scheduler failure', async t=>{
+  const f=fixture(t);await seed(f.legacy.database);const actions:string[]=[];
+  const legacy:SchedulerStatus={state:'ABSENT',nextAt:null,mode:'LEGACY',legacyDetected:true,legacyActive:true,targetCurrent:false};
+  const service=new DesktopService(f.target,f.legacy,dependencies({schedulerPolicy:'TASK',scheduler:async()=>legacy,
+    syncScheduler:async action=>{actions.push(action);return {...legacy,legacyActive:false};}}));
+  await service.initialize();assert.equal((await service.handle({method:'setAutoEnabled',payload:false})).ok,true);
+  assert.deepEqual(actions,['Disable']);await service.close();
 });
+
 test('invalid settings file is preserved; service returns fixed safe error instead of crash/reset', async t => {
   const f=fixture(t); const service=new DesktopService(f.target,f.legacy,dependencies()); await service.initialize();
   const file=join(f.target.state,'settings.json'); writeFileSync(file,'{"password":"synthetic-do-not-return"');
