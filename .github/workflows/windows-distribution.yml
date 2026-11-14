@@ -1,0 +1,46 @@
+name: Windows distribution verification
+
+on:
+  push:
+    branches: ['release/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=low
+      - run: npm audit --audit-level=high
+      - run: npm run typecheck
+      - run: node node_modules/playwright/cli.js install chromium
+      - run: node --import tsx --test --test-concurrency=2 tests/*.test.ts
+      - run: npm run dist:win
+        env:
+          HS_LMS_GOOGLE_CLIENT_ID: ''
+          HS_LMS_GOOGLE_CLIENT_SECRET: ''
+          HS_LMS_REQUIRE_GOOGLE_LOGIN: '0'
+      - run: node --import tsx --test tests/gui/clean-install.test.ts
+      - name: Record installer checksum
+        shell: pwsh
+        run: |
+          $installer = Get-Item release/HS-LMS-Notifier-Setup-*.exe
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content -LiteralPath release/SHA256SUMS.txt -Encoding ascii
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: HS-LMS-Notifier-Windows-x64
+          path: |
+            release/HS-LMS-Notifier-Setup-*.exe
+            release/SHA256SUMS.txt
+          if-no-files-found: error
